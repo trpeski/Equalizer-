@@ -1,0 +1,179 @@
+% Create the main UI figure
+MAIN = uifigure('Position', [700 1100 700 700]);
+
+% Initialize variables for audio data and sample rate as global
+global audioSignal sampleRate
+sampleRate = 0;
+
+% Function to design a peaking equalizer filter
+
+% Load the audio file and calculate the initial gains
+loadAudio(); % Load the audio file
+initialGains = clcfreq(audioSignal, sampleRate, frequencies); % Calculate initial gains
+
+% Define standard frequency bands (in Hz) and their initial gains (you can customize this)
+frequencies = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+
+% Create vertical sliders for each frequency band
+numSliders = numel(frequencies);
+sliderValues = initialGains; % Initialize slider values
+sliders = gobjects(numSliders, 1); % Create an array to store slider objects
+
+sliderWidth = 500;
+sliderHeight = 10; % Increase the slider height
+initialGains = 20 * log10(initialGains);
+initialGains = min(max(initialGains, -150), 150); % Clamp initial gains to the range of -150 dB to +150 dB
+for i = 1:numSliders
+    % Create a vertical slider
+    sliders(i) = uislider(MAIN, 'Position', [50 910-(i-1)*90 sliderWidth sliderHeight]); % Adjusted position and size
+    
+    % Create a label to display the frequency and slider's value
+    label = uilabel(MAIN, 'Position', [80 560-(i-1)*90 100 30]); % Adjusted position
+    label.Text = sprintf('%d Hz: %d dB', frequencies(i), round(initialGains(i))); % Use rounded initial gains
+    
+    % Set the initial value of the slider
+    sliderValues(i) = initialGains(i);
+    
+
+    % Set slider properties for increased sensitivity and range using the 'set' function
+    set(sliders(i), 'Limits', [-150, 150]); % Wider range (-24 dB to +24 dB)
+    set(sliders(i), 'MajorTicks', [-150:20:150]); % Major tick marks every 6 dB
+    set(sliders(i), 'Value', initialGains(i));
+    
+    % Add a listener to enforce the limits and update the label
+    addlistener(sliders(i), 'ValueChanged', @(src, event) updateSlider(src, label, -24, 24, i));
+    
+    % Store the label as UserData in the slider for later reference
+    sliders(i).UserData.Label = label;
+end
+
+% Create a button to apply the equalization
+applyButton = uibutton(MAIN, 'Position', [300 20 100 30], 'Text', 'Apply Equalization'); % Adjusted position
+applyButton.ButtonPushedFcn = @(btn,event) applyEqualization(sliderValues, frequencies, sliders);
+
+% Create a button to load an audio file
+loadButton = uibutton(MAIN, 'Position', [50 20 100 30], 'Text', 'Load Audio');
+
+% Create a button to save the processed audio
+saveButton = uibutton(MAIN, 'Position', [200 20 100 30], 'Text', 'Save Audio');
+
+
+
+
+
+function [b, a] = designParamEQ(centerFrequency, Q, gain, sampleRate)
+    w0 = (2 * pi * centerFrequency) / sampleRate;
+    alpha = sin(w0) / (2 * Q);
+    A = sqrt(10^(gain / 20));
+    
+    b0 = 1 + alpha * A;
+    b1 = -2 * cos(w0);
+    b2 = 1 - alpha * A;
+    a0 = 1 + alpha / A;
+    a1 = -2 * cos(w0);
+    a2 = 1 - alpha / A;
+    
+    b = [b0, b1, b2];
+    a = [a0, a1, a2];
+end
+
+% Function to apply equalization based on slider values
+function applyEqualization(values, frequencies, sliders)
+    global audioSignal sampleRate
+
+    frequencyMagnitudes = clcfreq(audioSignal, sampleRate, frequencies);
+    
+    % Update slider positions based on frequency magnitudes
+    for i = 1:numel(sliders)
+        slider = sliders(i);
+        gain = values(i);
+        
+        % Find the index in frequencyMagnitudes that corresponds to the current frequency
+        [~, index] = min(abs(frequencies(i) - frequencyMagnitudes));
+        
+        % Set the slider value based on the magnitude
+        slider.Value = gain + frequencyMagnitudes(index); % Adjust gain based on magnitude
+        
+        % Update the label
+        label = slider.UserData.Label;
+        label.Text = sprintf('%d Hz: %d dB', frequencies(i), round(slider.Value));
+    end
+    
+    if isempty(audioSignal) || sampleRate == 0
+        disp('Please load an audio file first.');
+        return;
+    end
+    
+    numBands = numel(frequencies);
+    filteredSignal = audioSignal;
+
+    for i = 1:numBands
+        centerFrequency = frequencies(i);
+        gain = values(i);
+        
+        % Calculate bandwidth (Q factor), you can customize this
+        Q = 2.0;
+        
+        % Design a peaking equalizer filter
+        [b, a] = designParamEQ(centerFrequency, Q, gain, sampleRate);
+        
+        % Apply the filter to the audio signal
+        filteredSignal = filter(b, a, filteredSignal);
+    end
+    
+    % Play the processed audio (for demonstration)
+    soundsc(filteredSignal, sampleRate);
+end
+
+% Function to save the processed audio
+function saveAudio(filteredSignal, sampleRate)
+    global audioSignal sampleRate
+    if isempty(audioSignal) || sampleRate == 0
+        disp('No processed audio to save.');
+        return;
+    end
+    
+    [filename, pathname] = uiputfile({'*.wav', 'Waveform Audio File Format (*.wav)'}, 'Save processed audio as');
+    
+    if filename
+        filePath = fullfile(pathname, filename);
+        audiowrite(filePath, filteredSignal, sampleRate);
+        disp(['Saved processed audio as: ' filename]);
+    end
+end
+
+% Function to calculate frequency magnitudes
+function frequencyMagnitudes = clcfreq(audioSignal, sampleRate, frequencies) 
+    % Perform FFT on the audio signal
+    N = length(audioSignal);
+    fftResult = fft(audioSignal);
+    
+    % Calculate the frequency axis for the FFT result
+    frequencyAxis = (0:N-1) * (sampleRate / N);
+    
+    % Initialize an array to store the magnitudes of the specified frequencies
+    frequencyMagnitudes = zeros(size(frequencies));
+    
+    % Calculate the magnitude for each specified frequency
+    for i = 1:numel(frequencies)
+        % Find the index in the frequency axis that corresponds to the desired frequency
+        [~, index] = min(abs(frequencyAxis - frequencies(i)));
+        
+        % Calculate the magnitude at that index
+        magnitude = abs(fftResult(index));
+        
+        % Store the magnitude in the result array
+        frequencyMagnitudes(i) = magnitude;
+    end
+end
+
+% Function to load an audio file
+function loadAudio()
+    global audioSignal sampleRate
+    [filename, pathname] = uigetfile({'*.wav', 'Waveform Audio File Format (*.wav)'}, 'Select an audio file');
+    if filename
+        filePath = fullfile(pathname, filename);
+        [audioSignal, sampleRate] = audioread(filePath);
+        disp(['Loaded audio file: ' filename]);
+    end
+end
