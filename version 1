@@ -1,51 +1,14 @@
 % Create the main UI figure
+global MAIN
 MAIN = uifigure('Position', [700 1100 700 700]);
 
 % Initialize variables for audio data and sample rate as global
-global audioSignal sampleRate
+global audioSignal sampleRate initialGains 
 sampleRate = 0;
 
-% Function to design a peaking equalizer filter
-
-% Load the audio file and calculate the initial gains
-loadAudio(); % Load the audio file
-initialGains = clcfreq(audioSignal, sampleRate, frequencies); % Calculate initial gains
-
-% Define standard frequency bands (in Hz) and their initial gains (you can customize this)
+% Define standard frequency bands (in Hz) and their initial gains 
 frequencies = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
-% Create vertical sliders for each frequency band
-numSliders = numel(frequencies);
-sliderValues = initialGains; % Initialize slider values
-sliders = gobjects(numSliders, 1); % Create an array to store slider objects
-
-sliderWidth = 500;
-sliderHeight = 10; % Increase the slider height
-initialGains = 20 * log10(initialGains);
-initialGains = min(max(initialGains, -150), 150); % Clamp initial gains to the range of -150 dB to +150 dB
-for i = 1:numSliders
-    % Create a vertical slider
-    sliders(i) = uislider(MAIN, 'Position', [50 910-(i-1)*90 sliderWidth sliderHeight]); % Adjusted position and size
-    
-    % Create a label to display the frequency and slider's value
-    label = uilabel(MAIN, 'Position', [80 560-(i-1)*90 100 30]); % Adjusted position
-    label.Text = sprintf('%d Hz: %d dB', frequencies(i), round(initialGains(i))); % Use rounded initial gains
-    
-    % Set the initial value of the slider
-    sliderValues(i) = initialGains(i);
-    
-
-    % Set slider properties for increased sensitivity and range using the 'set' function
-    set(sliders(i), 'Limits', [-150, 150]); % Wider range (-24 dB to +24 dB)
-    set(sliders(i), 'MajorTicks', [-150:20:150]); % Major tick marks every 6 dB
-    set(sliders(i), 'Value', initialGains(i));
-    
-    % Add a listener to enforce the limits and update the label
-    addlistener(sliders(i), 'ValueChanged', @(src, event) updateSlider(src, label, -24, 24, i));
-    
-    % Store the label as UserData in the slider for later reference
-    sliders(i).UserData.Label = label;
-end
 
 % Create a button to apply the equalization
 applyButton = uibutton(MAIN, 'Position', [300 20 100 30], 'Text', 'Apply Equalization'); % Adjusted position
@@ -53,13 +16,17 @@ applyButton.ButtonPushedFcn = @(btn,event) applyEqualization(sliderValues, frequ
 
 % Create a button to load an audio file
 loadButton = uibutton(MAIN, 'Position', [50 20 100 30], 'Text', 'Load Audio');
+loadButton.ButtonPushedFcn = @(btn,event) loadAudio(); % Set the loadAudio() function as the callback
 
 % Create a button to save the processed audio
 saveButton = uibutton(MAIN, 'Position', [200 20 100 30], 'Text', 'Save Audio');
+saveButton.ButtonPushedFcn = @(btn,event) saveAudio(filteredSignal, sampleRate); % Set the saveAudio() function as the callback
 
 
+% Function to design a peaking equalizer filter
 
-
+% Load the audio file and calculate the initial gains
+loadAudio(); % Load the audio file
 
 function [b, a] = designParamEQ(centerFrequency, Q, gain, sampleRate)
     w0 = (2 * pi * centerFrequency) / sampleRate;
@@ -169,11 +136,46 @@ end
 
 % Function to load an audio file
 function loadAudio()
-    global audioSignal sampleRate
+    global audioSignal sampleRate initialGains frequencies;
     [filename, pathname] = uigetfile({'*.wav', 'Waveform Audio File Format (*.wav)'}, 'Select an audio file');
     if filename
         filePath = fullfile(pathname, filename);
         [audioSignal, sampleRate] = audioread(filePath);
         disp(['Loaded audio file: ' filename]);
+    end
+
+    initialGains = clcfreq(audioSignal, sampleRate, frequencies); % Calculate initial gains
+    createSliders(initialGains);
+end
+
+
+function createSliders(initialGains)
+    global audioSignal sampleRate frequencies MAIN;
+
+    % Define standard frequency bands (in Hz)
+    frequencies = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+
+    % Create vertical sliders for each frequency band
+    numSliders = numel(frequencies);
+    sliders = gobjects(numSliders, 1); % Create an array to store slider objects
+    sliderWidth = 500;
+    sliderHeight = 10; % Increase the slider height
+    initialGains = 20 * log10(initialGains);
+    initialGains = min(max(initialGains, -150), 150); % Clamp initial gains
+
+    for i = 1:numSliders
+        % Create a vertical slider
+        sliders(i) = uislider(MAIN, 'Position', [50 910-(i-1)*90 sliderWidth sliderHeight]);
+
+        % Create a label to display the frequency and slider's value
+        label = uilabel(MAIN, 'Position', [80 560-(i-1)*90 100 30]);
+        label.Text = sprintf('%d Hz: %d dB', frequencies(i), round(initialGains(i)));
+
+        % Set the initial value of the slider
+        sliders(i).Value = initialGains(i);
+
+        % Set slider properties for increased sensitivity and range using the 'set' function
+        set(sliders(i), 'Limits', [-150, 150]); % Wider range (-150 dB to +150 dB)
+        set(sliders(i), 'MajorTicks', [-150:20:150]); % Major tick marks every 20 dB
     end
 end
